@@ -14,7 +14,7 @@ from sys import platform
 os.environ['TERM'] = 'xterm-256color'  # or another appropriate value
 
 # Set CUDA environment variable if using GPU acceleration
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 def main():
     parser = argparse.ArgumentParser()
@@ -41,7 +41,7 @@ def main():
     recorder.dynamic_energy_threshold = False
     source = sr.Microphone(sample_rate=16000)
 
-    audio_model = whisper.load_model("large")
+    audio_model = whisper.load_model("small")
 
     record_timeout = args.record_timeout
     phrase_timeout = args.phrase_timeout
@@ -96,7 +96,7 @@ def main():
                 buffer = update_buffer(text, buffer, max_words)
 
                 os.system('cls' if os.name == 'nt' else 'clear')
-                print('Start of buffer' + buffer)
+                print(buffer)
                 print('', end='', flush=True)
 
                 # Write the transcription to the output file

@@ -6,16 +6,49 @@ import whisper
 import torch
 import cv2
 import pygame
+import threading
 
 from datetime import datetime, timedelta
-from queue import Queue
+from queue import Queue, Empty
 from time import sleep
 
 # Set TERM environment variable
 os.environ['TERM'] = 'xterm-256color'  # or another appropriate value
 
 # Set CUDA environment variable if using GPU acceleration
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+
+def transcribe_audio(data_queue, transcription_queue, device, model, language, phrase_timeout):
+    phrase_time = None
+    buffer = ""
+
+    while True:
+        try:
+            now = datetime.utcnow()
+            if not data_queue.empty():
+                if phrase_time and now - phrase_time > timedelta(seconds=phrase_timeout):
+                    transcription_queue.put(buffer.strip())
+                    buffer = ""
+
+                phrase_time = now
+
+                audio_data = b''.join(data_queue.queue)
+                data_queue.queue.clear()
+
+                audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
+                audio_tensor = torch.tensor(audio_np).to(device)
+
+                result = model.transcribe(audio_tensor, language=language, fp16=device == "cuda")
+                text = result['text'].strip()
+
+                buffer += text + " "
+
+                transcription_queue.put(buffer.strip())
+
+            sleep(0.1)
+        except Exception as e:
+            print(f"Error in transcription thread: {e}")
+            break
 
 def main():
     parser = argparse.ArgumentParser()
@@ -35,14 +68,15 @@ def main():
 
     args = parser.parse_args()
 
-    phrase_time = None
     data_queue = Queue()
+    transcription_queue = Queue()
     recorder = sr.Recognizer()
     recorder.energy_threshold = args.energy_threshold
     recorder.dynamic_energy_threshold = False
     source = sr.Microphone(sample_rate=16000)
 
-    audio_model = whisper.load_model("large")
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    audio_model = whisper.load_model("small").to(device)
 
     record_timeout = args.record_timeout
     phrase_timeout = args.phrase_timeout
@@ -63,6 +97,10 @@ def main():
 
     print("Model loaded.\n")
 
+    transcription_thread = threading.Thread(target=transcribe_audio, args=(data_queue, transcription_queue, device, audio_model, language, phrase_timeout))
+    transcription_thread.daemon = True
+    transcription_thread.start()
+
     def update_buffer(text, buffer, max_words):
         words = buffer.split()
         words += text.split()
@@ -75,11 +113,13 @@ def main():
     # Initialize Pygame
     pygame.init()
     font = pygame.font.SysFont('Arial', 24)
-    screen = pygame.display.set_mode((640, 480))
+    screen = pygame.display.set_mode((1280, 720))  # Set a larger resolution for the window
     pygame.display.set_caption("Live Feed with Captions")
 
     # OpenCV video capture
     cap = cv2.VideoCapture(1)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # Set the frame width
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)  # Set the frame height
 
     while True:
         try:
@@ -88,31 +128,13 @@ def main():
             if not ret:
                 break
 
-            now = datetime.utcnow()
-            if not data_queue.empty():
-                phrase_complete = False
-                if phrase_time and now - phrase_time > timedelta(seconds=phrase_timeout):
-                    phrase_complete = True
-                phrase_time = now
-
-                audio_data = b''.join(data_queue.queue)
-                data_queue.queue.clear()
-
-                audio_np = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32768.0
-
-                result = audio_model.transcribe(audio_np, language=language, fp16=torch.cuda.is_available())
-                text = result['text'].strip()
-
-                if phrase_complete:
-                    transcription.append(text)
-                else:
-                    transcription[-1] = text
-
-                buffer = update_buffer(text, buffer, max_words)
-
-                # Write the transcription to the output file
-                with open(output_file, 'a') as f:
-                    f.write(text + ' ')
+            # Update buffer from transcription queue
+            try:
+                while True:
+                    new_text = transcription_queue.get_nowait()
+                    buffer = update_buffer(new_text, buffer, max_words)
+            except Empty:
+                pass
 
             # Clear the screen
             screen.fill((0, 0, 0))
@@ -127,7 +149,7 @@ def main():
 
             # Render the text
             text_surface = font.render(buffer, True, (255, 255, 255))
-            screen.blit(text_surface, (10, 450))
+            screen.blit(text_surface, (10, 680))  # Adjust the position to fit the larger window
 
             # Update the display
             pygame.display.flip()
@@ -138,7 +160,7 @@ def main():
                     pygame.quit()
                     return
 
-            sleep(0.25)
+            sleep(0.1)  # Reduce sleep time to make the feed more responsive
         except KeyboardInterrupt:
             break
 

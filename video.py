@@ -17,7 +17,7 @@ def transcribe_audio(audio_path, model):
 
 def draw_text_on_frame(frame, text, position):
     font = cv2.FONT_HERSHEY_SIMPLEX
-    font_scale = 1
+    font_scale = 0.75
     font_color = (255, 255, 255)
     font_thickness = 2
     bg_color = (0, 0, 0)
@@ -96,5 +96,5 @@ def main(video_path, output_path):
 
 if __name__ == "__main__":
     video_path = "./speech.mp4"  # Replace with your input video file path
-    output_path = "./output_video_with_captions111.mp4"  # Replace with your desired output video file path
+    output_path = "./output_video_with_captions_final12345.mp4"  # Replace with your desired output video file path
     main(video_path, output_path)
